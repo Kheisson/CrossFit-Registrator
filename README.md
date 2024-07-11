@@ -53,9 +53,12 @@ USER_EMAIL=your-email@example.com
 USER_PASSWORD=yourpassword
 SNS_REGION=your-sns-region
 SNS_TOPIC_ARN=your-sns-topic-arn
+TARGET_HOUR=18
+SCHEDULE_CONFIG={"6": "WOD", "1": "GAIN", "3": "WOD"}
 ```
-> Replace your-email@example.com, yourpassword, your-sns-region, and your-sns-topic-arn with your Arbox credentials and AWS SNS region and topic ARN.
 
+> Replace your-email@example.com, yourpassword, your-sns-region, and your-sns-topic-arn with your Arbox credentials and AWS SNS region and topic ARN.
+> TARGET_HOUR represents the time the class happens, SCHEDULE_CONFIG maps your schedule, and the default is - Sunday WOD, Monday GAIN, and Thursday WOD again.
 
 
 5. To test locally, uncomment the following lines in the script:
@@ -96,6 +99,9 @@ Set up the following environment variables within your Lambda function:
 
 **SNS_TOPIC_ARN**: The Amazon Resource Name (ARN) of your SNS Topic.
 
+**TARGET_HOUR**: The time at which you want to train
+
+**SCHEDULE_CONFIG**: JSON mapping of your schedule:     0: Monday | 1: Tuesday | 2: Wednesday | 3: Thursday | 4: Friday | 5: Saturday | 6: Sunday
 
 #### Creating SNS Topic and Subscription
 
@@ -105,7 +111,6 @@ Set up the following environment variables within your Lambda function:
 #### Lambda Execution Role
 
 * Create a role for your Lambda with the following policies:
-
 
 
 **AWSLambdaBasicExecutionRole**: Allows Lambda functions to execute and create logs.
