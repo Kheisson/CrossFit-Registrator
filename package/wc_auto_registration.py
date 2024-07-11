@@ -7,7 +7,6 @@ from dotenv import load_dotenv
 import boto3
 from requests.exceptions import HTTPError
 
-# Load environment variables
 load_dotenv()
 
 API_ENDPOINT = 'https://apiappv2.arboxapp.com'
@@ -15,7 +14,18 @@ USER_EMAIL = os.getenv('USER_EMAIL')
 USER_PASSWORD = os.getenv('USER_PASSWORD')
 SNS_REGION = os.getenv('SNS_REGION')
 SNS_TOPIC_ARN = os.getenv('SNS_TOPIC_ARN')
-TARGET_HOUR = 18  # 6 p.m
+TARGET_HOUR = int(os.getenv('TARGET_HOUR', 18))  # 6 p.m
+SCHEDULE_CONFIG = json.loads(os.getenv('SCHEDULE_CONFIG', '{"6": "WOD", "1": "GAIN", "3": "WOD"}'))
+
+# Hardcoded class ID mapping
+CLASS_ID_MAPPING = {
+    'WOD': [40066, 40067],
+    'Weightlifting': [40069],
+    'GAIN': [50223, 40072],
+    'Endurance': [40068],
+    'MOBILITY': [50226],
+    'Gymnastics': [40070]
+}
 
 # Common headers
 HEADERS = {
@@ -59,14 +69,14 @@ def get_target_datetime(current_datetime):
     '''
     0: Monday | 1: Tuesday | 2: Wednesday | 3: Thursday | 4: Friday | 5: Saturday | 6: Sunday
     '''
-    days_to_add = {6: 2, 1: 2, 3: 3}  # Customize your days logic here
+    days_to_add = {6: 2, 0: 2, 1: 2, 3: 3, 4: 2, 5: 2}  # Customize your days logic here
     days_ahead = days_to_add.get(current_datetime.weekday(), 2)
     target_date = current_datetime + datetime.timedelta(days=days_ahead)
 
     return target_date.replace(hour=target_hour, minute=0, second=0, microsecond=0)
 
 
-def get_schedule_id_for_class(auth_token, target_datetime):
+def get_schedule_id_for_class(auth_token, target_datetime, class_ids):
     date_str = target_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
     target_time_str = target_datetime.strftime("%H:%M")
     schedules_url = f"{API_ENDPOINT}/api/v2/schedule/betweenDates"
@@ -91,7 +101,7 @@ def get_schedule_id_for_class(auth_token, target_datetime):
     if response.status_code == 200:
         schedules = response.json().get('data', [])
         for schedule_item in schedules:
-            if schedule_item['box_category_fk'] == 40066 and schedule_item['time'] == target_time_str:
+            if schedule_item['box_category_fk'] in class_ids and schedule_item['time'] == target_time_str:
                 return schedule_item['id'], schedule_item['time'], schedule_item['box_categories']['name']
     else:
         print(f"Failed to get schedule id: {response.status_code} - {response.text}")
@@ -172,7 +182,15 @@ def lambda_handler(event, context):
             israel_now = utc_now + datetime.timedelta(hours=2)
 
         target_datetime = get_target_datetime(israel_now)
-        schedule_id, class_time, class_name = get_schedule_id_for_class(auth_token, target_datetime)
+
+        class_name = SCHEDULE_CONFIG.get(str(israel_now.weekday()))
+        class_ids = CLASS_ID_MAPPING.get(class_name, [])
+
+        if not class_ids:
+            raise Exception(f"No class IDs found for the specified class: {class_name}")
+
+        schedule_id, class_time, class_name = get_schedule_id_for_class(auth_token, target_datetime, class_ids)
+
         if schedule_id:
             membership_user_id = get_membership_id(auth_token)
             if membership_user_id:
