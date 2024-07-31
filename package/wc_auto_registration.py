@@ -40,7 +40,6 @@ HEADERS = {
     "refreshtoken": "undefined",
 }
 
-
 def perform_login():
     login_url = f"{API_ENDPOINT}/api/v2/user/login"
     login_payload = {"email": USER_EMAIL, "password": USER_PASSWORD}
@@ -55,12 +54,10 @@ def perform_login():
     except Exception as err:
         raise Exception(f"An error occurred: {err}")
 
-
 def israel_is_dst():
     tz = pytz.timezone('Asia/Jerusalem')
     now = datetime.datetime.now(tz)
     return now.dst() != datetime.timedelta(0)
-
 
 def get_target_datetime(current_datetime):
     target_hour = TARGET_HOUR
@@ -69,12 +66,10 @@ def get_target_datetime(current_datetime):
     '''
     0: Monday | 1: Tuesday | 2: Wednesday | 3: Thursday | 4: Friday | 5: Saturday | 6: Sunday
     '''
-    days_to_add = {6: 2, 0: 2, 1: 2, 3: 3, 4: 2, 5: 2}  # Customize your days logic here
+    days_to_add = {6: 2, 1: 2, 3: 3}  # Customize your days logic here
     days_ahead = days_to_add.get(current_datetime.weekday(), 2)
     target_date = current_datetime + datetime.timedelta(days=days_ahead)
-
     return target_date.replace(hour=target_hour, minute=0, second=0, microsecond=0)
-
 
 def get_schedule_id_for_class(auth_token, target_datetime, class_ids):
     date_str = target_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -91,22 +86,16 @@ def get_schedule_id_for_class(auth_token, target_datetime, class_ids):
     headers_with_auth_token = HEADERS.copy()
     headers_with_auth_token["accessToken"] = auth_token
 
-    response = requests.post(
-        schedules_url,
-        headers=headers_with_auth_token,
-        params=params,
-        verify=False
-    )
-
-    if response.status_code == 200:
+    try:
+        response = requests.post(schedules_url, headers=headers_with_auth_token, params=params, verify=False)
+        response.raise_for_status()
         schedules = response.json().get('data', [])
         for schedule_item in schedules:
             if schedule_item['box_category_fk'] in class_ids and schedule_item['time'] == target_time_str:
                 return schedule_item['id'], schedule_item['time'], schedule_item['box_categories']['name']
-    else:
-        print(f"Failed to get schedule id: {response.status_code} - {response.text}")
-        return None
-
+    except Exception as e:
+        print(f"Failed to get schedule id: {e}")
+    return None, None, None
 
 def get_membership_id(auth_token):
     membership_url = f"{API_ENDPOINT}/api/v2/boxes/59/memberships/1?XDEBUG_SESSION_START=PHPSTORM"
@@ -114,19 +103,14 @@ def get_membership_id(auth_token):
     headers_with_auth_token = HEADERS.copy()
     headers_with_auth_token["accessToken"] = auth_token
 
-    response = requests.get(
-        membership_url,
-        headers=headers_with_auth_token,
-        verify=False
-    )
-
-    if response.status_code == 200:
+    try:
+        response = requests.get(membership_url, headers=headers_with_auth_token, verify=False)
+        response.raise_for_status()
         data = response.json().get('data', [{}])
         return data[0].get('id') if data else None
-    else:
-        print(f"Failed to get membership id: {response.status_code} - {response.text}")
-        return None
-
+    except Exception as e:
+        print(f"Failed to get membership id: {e}")
+    return None
 
 def register_for_class(auth_token, membership_user_id, schedule_id, class_time, class_name):
     register_url = f"{API_ENDPOINT}/api/v2/scheduleUser/insert"
@@ -139,23 +123,17 @@ def register_for_class(auth_token, membership_user_id, schedule_id, class_time, 
     headers_with_token = HEADERS.copy()
     headers_with_token["accessToken"] = auth_token
 
-    response = requests.post(
-        register_url,
-        headers=headers_with_token,
-        json=payload,
-        verify=False
-    )
-
-    if response.status_code == 200:
+    try:
+        response = requests.post(register_url, headers=headers_with_token, json=payload, verify=False)
+        response.raise_for_status()
         send_sns_notification("Registration Successful",
                               f"Successfully registered for class with schedule ID: {schedule_id}\n"
                               f"Details: {class_time}\tat\t{class_name}")
         print(f"Registered successfully for class with schedule ID: {schedule_id}")
-    else:
+    except Exception as e:
         send_sns_notification("Registration Failed",
-                              f"Failed to register to class: {class_name} at time: {class_time}\n")
-        print(f"Failed to register for class: {response.status_code} - {response.text}")
-
+                              f"Failed to register to class: {class_name} at time: {class_time}\n{e}")
+        print(f"Failed to register for class: {e}")
 
 def send_sns_notification(subject, message):
     # enable in local test
@@ -170,7 +148,6 @@ def send_sns_notification(subject, message):
     except Exception as e:
         print(f"Failed to send SNS notification: {e}")
 
-
 def lambda_handler(event, context):
     try:
         auth_token, _ = perform_login()
@@ -182,7 +159,6 @@ def lambda_handler(event, context):
             israel_now = utc_now + datetime.timedelta(hours=2)
 
         target_datetime = get_target_datetime(israel_now)
-
         class_name = SCHEDULE_CONFIG.get(str(israel_now.weekday()))
         class_ids = CLASS_ID_MAPPING.get(class_name, [])
 
