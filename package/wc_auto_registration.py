@@ -15,7 +15,7 @@ USER_PASSWORD = os.getenv('USER_PASSWORD')
 SNS_REGION = os.getenv('SNS_REGION')
 SNS_TOPIC_ARN = os.getenv('SNS_TOPIC_ARN')
 TARGET_HOUR = int(os.getenv('TARGET_HOUR', 18))  # 6 p.m
-SCHEDULE_CONFIG = json.loads(os.getenv('SCHEDULE_CONFIG', '{"6": "WOD", "1": "GAIN", "3": "WOD"}'))
+SCHEDULE_CONFIG = json.loads(os.getenv('SCHEDULE_CONFIG', '{"6": "GAIN", "1": "WOD", "3": "WOD"}'))
 
 # Hardcoded class ID mapping
 CLASS_ID_MAPPING = {
@@ -40,6 +40,9 @@ HEADERS = {
     "refreshtoken": "undefined",
 }
 
+def log(message):
+    print(message)  # This will output to CloudWatch in AWS Lambda
+
 def perform_login():
     login_url = f"{API_ENDPOINT}/api/v2/user/login"
     login_payload = {"email": USER_EMAIL, "password": USER_PASSWORD}
@@ -48,10 +51,13 @@ def perform_login():
         response = requests.post(login_url, json=login_payload, headers=HEADERS, verify=False)
         response.raise_for_status()
         data = response.json()['data']
+        log(f"Logged in successfully. User ID: {data['id']}")
         return data['token'], data['id']
     except HTTPError as http_err:
+        log(f"HTTP error occurred: {http_err}")
         raise Exception(f"HTTP error occurred: {http_err}")
     except Exception as err:
+        log(f"An error occurred during login: {err}")
         raise Exception(f"An error occurred: {err}")
 
 def israel_is_dst():
@@ -61,14 +67,10 @@ def israel_is_dst():
 
 def get_target_datetime(current_datetime):
     target_hour = TARGET_HOUR
-    # Dictionary to map current day to days ahead for class scheduling.
-    # For instance, {6: 2} means if today is Sunday (6), add 2 days (class will be on Tuesday).
-    '''
-    0: Monday | 1: Tuesday | 2: Wednesday | 3: Thursday | 4: Friday | 5: Saturday | 6: Sunday
-    '''
-    days_to_add = {6: 2, 1: 2, 3: 3}  # Customize your days logic here
+    days_to_add = {6: 2, 1: 2, 3: 3}  # Sunday -> Tuesday, Tuesday -> Thursday, Thursday -> Sunday
     days_ahead = days_to_add.get(current_datetime.weekday(), 2)
     target_date = current_datetime + datetime.timedelta(days=days_ahead)
+    log(f"Calculated target date: {target_date}")
     return target_date.replace(hour=target_hour, minute=0, second=0, microsecond=0)
 
 def get_schedule_id_for_class(auth_token, target_datetime, class_ids):
@@ -91,10 +93,12 @@ def get_schedule_id_for_class(auth_token, target_datetime, class_ids):
         response.raise_for_status()
         schedules = response.json().get('data', [])
         for schedule_item in schedules:
+            log(f"Checking schedule item: {schedule_item}")
             if schedule_item['box_category_fk'] in class_ids and schedule_item['time'] == target_time_str:
+                log(f"Found matching schedule: {schedule_item['id']} for class ID: {schedule_item['box_category_fk']}")
                 return schedule_item['id'], schedule_item['time'], schedule_item['box_categories']['name']
     except Exception as e:
-        print(f"Failed to get schedule id: {e}")
+        log(f"Failed to get schedule id: {e}")
     return None, None, None
 
 def get_membership_id(auth_token):
@@ -107,9 +111,11 @@ def get_membership_id(auth_token):
         response = requests.get(membership_url, headers=headers_with_auth_token, verify=False)
         response.raise_for_status()
         data = response.json().get('data', [{}])
-        return data[0].get('id') if data else None
+        membership_id = data[0].get('id') if data else None
+        log(f"Retrieved membership ID: {membership_id}")
+        return membership_id
     except Exception as e:
-        print(f"Failed to get membership id: {e}")
+        log(f"Failed to get membership id: {e}")
     return None
 
 def register_for_class(auth_token, membership_user_id, schedule_id, class_time, class_name):
@@ -129,11 +135,11 @@ def register_for_class(auth_token, membership_user_id, schedule_id, class_time, 
         send_sns_notification("Registration Successful",
                               f"Successfully registered for class with schedule ID: {schedule_id}\n"
                               f"Details: {class_time}\tat\t{class_name}")
-        print(f"Registered successfully for class with schedule ID: {schedule_id}")
+        log(f"Registered successfully for class with schedule ID: {schedule_id}")
     except Exception as e:
         send_sns_notification("Registration Failed",
                               f"Failed to register to class: {class_name} at time: {class_time}\n{e}")
-        print(f"Failed to register for class: {e}")
+        log(f"Failed to register for class: {e}")
 
 def send_sns_notification(subject, message):
     # enable in local test
@@ -145,8 +151,9 @@ def send_sns_notification(subject, message):
     # aws_secret_access_key=aws_secret_access_key
     try:
         sns_client.publish(TopicArn=SNS_TOPIC_ARN, Message=message, Subject=subject)
+        log(f"SNS notification sent: {subject}")
     except Exception as e:
-        print(f"Failed to send SNS notification: {e}")
+        log(f"Failed to send SNS notification: {e}")
 
 def lambda_handler(event, context):
     try:
@@ -158,9 +165,14 @@ def lambda_handler(event, context):
         else:
             israel_now = utc_now + datetime.timedelta(hours=2)
 
+        log(f"Current Israel time: {israel_now}")
+
         target_datetime = get_target_datetime(israel_now)
         class_name = SCHEDULE_CONFIG.get(str(israel_now.weekday()))
         class_ids = CLASS_ID_MAPPING.get(class_name, [])
+
+        log(f"Class name for today: {class_name}")
+        log(f"Class IDs: {class_ids}")
 
         if not class_ids:
             raise Exception(f"No class IDs found for the specified class: {class_name}")
@@ -180,6 +192,7 @@ def lambda_handler(event, context):
         else:
             raise Exception("No schedule ID found for registration.")
     except Exception as e:
+        log(f"Registration process failed: {e}")
         send_sns_notification("Registration Failed", f"Failed to register for class: {e}")
         return {
             'statusCode': 500,
