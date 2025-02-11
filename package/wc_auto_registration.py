@@ -14,17 +14,17 @@ USER_EMAIL = os.getenv('USER_EMAIL')
 USER_PASSWORD = os.getenv('USER_PASSWORD')
 SNS_REGION = os.getenv('SNS_REGION')
 SNS_TOPIC_ARN = os.getenv('SNS_TOPIC_ARN')
-TARGET_HOUR = int(os.getenv('TARGET_HOUR', 18))  # 6 p.m
-SCHEDULE_CONFIG = json.loads(os.getenv('SCHEDULE_CONFIG', '{"6": "GAIN", "1": "WOD", "3": "WOD"}'))
+SCHEDULE_CONFIG = json.loads(os.getenv('SCHEDULE_CONFIG', '{}'))
 
 # Hardcoded class ID mapping
 CLASS_ID_MAPPING = {
     'WOD': [40066, 40067],
     'Weightlifting': [40069],
-    'GAIN': [50223, 40072],
+    'PUMP': [50223, 40072, 119364],
     'Endurance': [40068],
     'MOBILITY': [50226],
-    'Gymnastics': [40070]
+    'Gymnastics': [40070],
+    'YOGA': [50225],
 }
 
 # Common headers
@@ -40,8 +40,10 @@ HEADERS = {
     "refreshtoken": "undefined",
 }
 
+
 def log(message):
     print(message)  # This will output to CloudWatch in AWS Lambda
+
 
 def perform_login():
     login_url = f"{API_ENDPOINT}/api/v2/user/login"
@@ -60,18 +62,29 @@ def perform_login():
         log(f"An error occurred during login: {err}")
         raise Exception(f"An error occurred: {err}")
 
+
 def israel_is_dst():
     tz = pytz.timezone('Asia/Jerusalem')
     now = datetime.datetime.now(tz)
     return now.dst() != datetime.timedelta(0)
 
+
 def get_target_datetime(current_datetime):
-    target_hour = TARGET_HOUR
-    days_to_add = {6: 2, 1: 2, 3: 3}  # Sunday -> Tuesday, Tuesday -> Thursday, Thursday -> Sunday
-    days_ahead = days_to_add.get(current_datetime.weekday(), 2)
-    target_date = current_datetime + datetime.timedelta(days=days_ahead)
+    weekday = current_datetime.weekday()
+    if weekday == 3:  # Thursday
+        target_date = current_datetime + datetime.timedelta(days=3)  # Register for Sunday
+    elif weekday == 4:  # Friday
+        target_date = current_datetime + datetime.timedelta(days=3)  # Register for Monday
+    else:
+        target_date = current_datetime + datetime.timedelta(days=2)  # Register 48 hours ahead
+
+    day_config = SCHEDULE_CONFIG.get(str(target_date.weekday()), {})
+    target_hour = day_config.get("hour", 18)
+    target_minute = day_config.get("minute", 0)
+    target_date = target_date.replace(hour=target_hour, minute=target_minute, second=0, microsecond=0)
     log(f"Calculated target date: {target_date}")
-    return target_date.replace(hour=target_hour, minute=0, second=0, microsecond=0)
+    return target_date
+
 
 def get_schedule_id_for_class(auth_token, target_datetime, class_ids):
     date_str = target_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -101,6 +114,7 @@ def get_schedule_id_for_class(auth_token, target_datetime, class_ids):
         log(f"Failed to get schedule id: {e}")
     return None, None, None
 
+
 def get_membership_id(auth_token):
     membership_url = f"{API_ENDPOINT}/api/v2/boxes/59/memberships/1?XDEBUG_SESSION_START=PHPSTORM"
 
@@ -117,6 +131,7 @@ def get_membership_id(auth_token):
     except Exception as e:
         log(f"Failed to get membership id: {e}")
     return None
+
 
 def register_for_class(auth_token, membership_user_id, schedule_id, class_time, class_name):
     register_url = f"{API_ENDPOINT}/api/v2/scheduleUser/insert"
@@ -141,6 +156,7 @@ def register_for_class(auth_token, membership_user_id, schedule_id, class_time, 
                               f"Failed to register to class: {class_name} at time: {class_time}\n{e}")
         log(f"Failed to register for class: {e}")
 
+
 def send_sns_notification(subject, message):
     # enable in local test
     # aws_access_key_id = os.getenv('AWS_ACCESS_KEY_ID')
@@ -155,6 +171,7 @@ def send_sns_notification(subject, message):
     except Exception as e:
         log(f"Failed to send SNS notification: {e}")
 
+
 def lambda_handler(event, context):
     try:
         auth_token, _ = perform_login()
@@ -168,10 +185,10 @@ def lambda_handler(event, context):
         log(f"Current Israel time: {israel_now}")
 
         target_datetime = get_target_datetime(israel_now)
-        class_name = SCHEDULE_CONFIG.get(str(israel_now.weekday()))
+        class_name = SCHEDULE_CONFIG.get(str(target_datetime.weekday()), {}).get("class")
         class_ids = CLASS_ID_MAPPING.get(class_name, [])
 
-        log(f"Class name for today: {class_name}")
+        log(f"Class name for target date: {class_name}")
         log(f"Class IDs: {class_ids}")
 
         if not class_ids:
