@@ -42,6 +42,7 @@ venv\Scripts\activate  # On Windows
 
 
 ```bash
+cd package
 pip install -r requirements.txt
 ```
 
@@ -77,6 +78,12 @@ python lambda_function.py
 ```
 
 ## AWS Lambda Deployment
+
+### Usage
+
+* After testing, go into the package folder.
+* run - ```pip install -r requirements.txt -t .``` If you haven't yet (to install the dependencies in the same folder as the main code)
+* Next, run - ```zip -r package.zip .``` this is done to create the package we need to upload.
 
 ### Creating Lambda Function
 
@@ -120,6 +127,3 @@ Set up the following environment variables within your Lambda function:
 In AWS Lambda, use EventBridge (formerly CloudWatch Events) to create a trigger.
 Set up a cron expression to schedule execution at the desired times. Example: cron(0 18 * * ? *) to run every day at 6 PM UTC.
 
-### Usage
-
-Customize the scheduling by modifying the TARGET_HOUR and days_to_add dictionary in the code. These values determine the class schedule and registration rules. You can set which days to skip and which class times to target.
