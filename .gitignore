@@ -159,3 +159,19 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 .idea/
 .DS_Store
+package/bin
+package/boto*
+pacakge/cert*
+package/char*
+pacakge/dateutil
+package/dotenv
+package/idna*
+package/jme*
+package/python*
+package/pytz*
+package/requests*
+package/s3*
+package/six*
+package/url*
+package/cert*
+package/date*
